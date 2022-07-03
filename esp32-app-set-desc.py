@@ -98,12 +98,12 @@ def rewrite_app_desc(fw_elf, fw_bin, timestamp=datetime.today().replace(microsec
 	orig_app_desc = data[segment_offs[0] + sizeof_esp_image_segment_header_t:segment_offs[0] + sizeof_esp_image_segment_header_t + sizeof_esp_app_desc_t]
 	app_desc = list(struct.unpack(app_desc_fmt, orig_app_desc))
 	app_desc[0] == 0xABCD5432, f"ESP_APP_DESC_MAGIC_WORD {app_desc[0]:04X}"
-	if version:
-		app_desc[4] = version.encode("utf-8")[0:31]
-	if name:
-		app_desc[5] = name.encode("utf-8")[0:31]
-	app_desc[6] = str(timestamp.time()).encode("utf-8")[0:31]
-	app_desc[7] = str(timestamp.date()).encode("utf-8")[0:31]
+	if version is not None:
+		app_desc[4] = _utf8_truncate(version, 31)
+	if name is not None:
+		app_desc[5] = _utf8_truncate(name, 31)
+	app_desc[6] = _utf8_truncate(_time_format(timestamp), 31)
+	app_desc[7] = _utf8_truncate(_date_format(timestamp), 31)
 	app_desc[9] = hash_elf[0:32]
 	new_app_desc = struct.pack(app_desc_fmt, *app_desc)
 
@@ -142,6 +142,14 @@ def after_fw_bin(source, target, env):
 
 	print(f"Update ESP32 app descriptor in {fw_bin}: {str_desc}")
 	rewrite_app_desc(fw_elf, fw_bin, **desc)
+
+def _utf8_truncate(text, max_len):
+	text = text[0:max_len]
+	data = text.encode("utf-8")
+	while len(data) > max_len:
+		text = text[:-1]
+		data = text.encode("utf-8")
+	return data
 
 def _date_format(dt):
 	return str(dt.date())
