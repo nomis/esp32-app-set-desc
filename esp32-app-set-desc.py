@@ -49,7 +49,6 @@ def rewrite_app_desc(fw_elf, fw_bin, timestamp=datetime.today().replace(microsec
 	image_segment_header_fmt = "<2L"
 	app_desc_fmt = "<2L 2L 32s 32s 16s 16s 32s 32s 20L"
 
-	HASH_LEN = 32
 	segments = 0
 	data = b""
 	with open(fw_bin, "rb") as f:
@@ -61,6 +60,12 @@ def rewrite_app_desc(fw_elf, fw_bin, timestamp=datetime.today().replace(microsec
 
 		segments = image_header[1]
 		hash_appended = image_header[19]
+		if hash_appended == 0:
+			hash_len = 0
+		elif hash_appended == 1:
+			hash_len = 32
+		else:
+			raise ValueError(f"Unsupported hash type {hash_appended}")
 		checksum_act = 0xEF
 
 		segment_offs = []
@@ -78,20 +83,22 @@ def rewrite_app_desc(fw_elf, fw_bin, timestamp=datetime.today().replace(microsec
 			assert len(segment) == segment_lens[i]
 			data += segment
 
-		remaining_len = (16 - (len(data) % 16)) + HASH_LEN
+		remaining_len = (16 - (len(data) % 16)) + hash_len
 		remaining = f.read(remaining_len)
 		assert len(remaining) == remaining_len
 		data += remaining
 		assert len(f.read()) == 0, "unexpected/unsupported trailing data in file"
 
-		checksum_exp = data[-HASH_LEN - 1]
+		checksum_exp = data[-hash_len - 1]
 		checksum_act = checksum_act
 
-		hash_image_exp = data[-HASH_LEN:].hex()
-		hash_image_act = hashlib.sha256(data[:-HASH_LEN]).hexdigest()
-
 		assert checksum_act == checksum_exp, f"checksum mismatch: {checksum_act:02X} {checksum_exp:02X}"
-		assert hash_image_act == hash_image_exp, f"hash mismatch: {hash_image_act} {hash_image_exp}"
+
+		if hash_appended == 1:
+			hash_image_exp = data[-hash_len:].hex()
+			hash_image_act = hashlib.sha256(data[:-hash_len]).hexdigest()
+
+			assert hash_image_act == hash_image_exp, f"hash mismatch: {hash_image_act} {hash_image_exp}"
 
 	assert(segments > 0), "Image has no segments"
 
@@ -113,9 +120,10 @@ def rewrite_app_desc(fw_elf, fw_bin, timestamp=datetime.today().replace(microsec
 	for b in new_app_desc:
 		new_checksum ^= b
 
-	new_data = data[0:segment_offs[0] + sizeof_esp_image_segment_header_t] + new_app_desc + data[segment_offs[0] + sizeof_esp_image_segment_header_t + sizeof_esp_app_desc_t:-HASH_LEN - 1]
+	new_data = data[0:segment_offs[0] + sizeof_esp_image_segment_header_t] + new_app_desc + data[segment_offs[0] + sizeof_esp_image_segment_header_t + sizeof_esp_app_desc_t:-hash_len - 1]
 	new_data += bytes([new_checksum])
-	new_data += hashlib.sha256(new_data).digest()
+	if hash_appended == 1:
+		new_data += hashlib.sha256(new_data).digest()
 
 	with open(f"{fw_bin}~", "wb") as f:
 		f.write(new_data)
